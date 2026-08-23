@@ -20,7 +20,7 @@ dsh plugin --profile web add dsh-llm-api-pool
 包声明了 `dsh.bundle.patch` + `dsh.client`,`dsh plugin add` 会:
 1. 把包加入 profile 依赖;
 2. 发现 `dsh.bundle.patch` → 自动把 `dsh-llm-api-pool` 追加进 `dsh.profile.bundles`;
-3. 启动时合成 `cordis.patch.yml`:host 半(池管理 + `/llm-pool/api` JSON 路由 + `/llm-pool/v1` OpenAI 兼容端点)挂进 host 组合;`dsh.client` 声明让 client 半(设置页)被 web shell 装载。
+3. 启动时合成 `cordis.patch.yml`:host 半(池管理 + `/llm-pool/api` JSON 路由 + `/llm-pool/v1` OpenAI 兼容端点 + **DSH 原生模型 provider 自动注册**)挂进 host 组合;`dsh.client` 声明让 client 半(设置页)被 web shell 装载。
 
 > 安装/挂载的机制引用自 dsh 官方 CLI 协调流程;发布包自身通过 `test/smoke-static.mjs` 守护 host 半的注册与路由回路,完整 Web 挂载与重启后的设置页渲染请在首次安装后核对。
 
@@ -32,6 +32,16 @@ dsh plugin --profile web add dsh-llm-api-pool
 4. 添加第二个订阅(不同 key)→ 第二张卡片,各自独立余额;模型请求自动优先路由到余量最大的订阅,失败自动切换。
 
 模型也可直接调用池工具:`llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`。
+
+## 作为 DSH 原生 provider 使用(0.1.6,零配置)
+
+装载后插件**自动**向 DSH 注册一个名为 **LLM API Pool (余额热切换)** 的模型 provider:
+
+- **模型选择器自动出现**:模型列表 = 池内所有条目探查到的模型并集,选中任何一个即走池路由(余额热切换自动接管);
+- **模型设置页自动显示该 provider 行**:显示为已就绪,没有任何需要填写的字段(baseUrl/apiKey 都来自池,不在模型设置里);
+- 池为空时 provider 的模型列表为空,添加第一个 key 后自动出现。
+
+无需手动添加 provider、无需填 baseUrl/apiKey。
 
 ## 作为 OpenAI 兼容 provider 接入(0.1.5)
 
@@ -83,8 +93,8 @@ dsh plugin --profile web remove dsh-llm-api-pool
 ## 开发与测试
 
 ```bash
-npm test          # 静态包冒烟:mock ctx 下跑通 10 工具注册 + /llm-pool/api add→balance→list + /llm-pool/v1 OpenAI 端点(12 项断言)
-node ../llm-pool-test/e2e.test.mjs             # 完整 E2E:32 项(T1 host / T1b 多订阅路由 / T2 client 渲染 / T3 live 端点)
+npm test          # 静态包冒烟:mock ctx 下跑通 10 工具注册 + /llm-pool/api + /llm-pool/v1 OpenAI 端点 + DSH 原生 provider 注册/stream(20 项断言)
+node ../llm-pool-test/e2e.test.mjs             # 完整 E2E:39 项(T1 host / T1c provider 注册 / T1b 多订阅路由 / T2 client 渲染 / T3 live 端点 / T4 真实 key)
 LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs   # 真实 key 全生命周期(增查改删 + 真实余额 + 真实 chat)
 ```
 

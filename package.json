@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-api-pool",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "为 opencode go 设计的 API 池:根据余额热管理切换不同 API key,官方用量/余额查询 + 设置页图形化管理。",
   "type": "module",
   "license": "MIT",
@@ -38,7 +38,8 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "*"
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
   },
   "keywords": [
     "dsh",
@@ -61,6 +62,7 @@
     "README.en.md"
   ],
   "devDependencies": {
-    "@deepseek-ai/dsh-tools": "*"
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
   }
 }

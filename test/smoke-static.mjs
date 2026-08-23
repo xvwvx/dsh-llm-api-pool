@@ -7,6 +7,8 @@ import { Readable } from 'node:stream';
 const files = new Map();
 const registered = [];
 const routes = [];
+const llmCalls = { configurable: null, adapter: null, discovery: null };
+const settingsCalls = { ns: null };
 
 function makeCtx() {
   return {
@@ -16,7 +18,7 @@ function makeCtx() {
         const url = spec.env.LLM_POOL_URL;
         if (url.includes('/models')) return { stdout: { text: JSON.stringify({ object: 'list', data: [{ id: 'deepseek-v4-flash' }, { id: 'kimi-k3' }] }) + '\n200' }, exitCode: 0 };
         if (url.includes('/usage')) return { stdout: { text: JSON.stringify({ usage: { rolling: { percent: 9, resetsAt: 't' }, weekly: { percent: 13, resetsAt: 't' }, monthly: { percent: 6, resetsAt: 't' } } }) + '\n200' }, exitCode: 0 };
-        if (url.includes('/chat/completions')) return { stdout: { text: JSON.stringify({ usage: { prompt_tokens: 1000, completion_tokens: 500 } }) + '\n200' }, exitCode: 0 };
+        if (url.includes('/chat/completions')) return { stdout: { text: JSON.stringify({ usage: { prompt_tokens: 1000, completion_tokens: 500 }, choices: [{ message: { role: 'assistant', content: 'mock answer' }, finish_reason: 'stop' }] }) + '\n200' }, exitCode: 0 };
         return { stdout: { text: 'nf\n404' }, exitCode: 0 };
       },
     },
@@ -28,6 +30,14 @@ function makeCtx() {
         async writeText(p, t) { files.set(p, t); },
       },
       sandboxPolicy: { workspaceRoot: '/mem' },
+      llm: {
+        registerConfigurableProviders: (entries) => { llmCalls.configurable = entries; return () => {}; },
+        registerAdapter: (providers, adapter) => { llmCalls.adapter = { providers, adapter }; return () => {}; },
+        registerModelDiscovery: (ns, discover) => { llmCalls.discovery = { ns, discover }; return () => {}; },
+      },
+      settings: {
+        register: (ns, schema) => { settingsCalls.ns = ns; return { get: () => schema }; },
+      },
     }[k]),
     effect: (fn) => fn(),
     tools: { register: (def) => { registered.push(def.name); return () => {}; } },
@@ -95,6 +105,32 @@ check('openai chat pool metadata (api used)', chat.body.pool && chat.body.pool.a
 // unknown model → OpenAI-shaped error
 const badModel = await post(routes[1], '/llm-pool/v1/chat/completions', { model: 'no-such-model', messages: [{ role: 'user', content: 'x' }] });
 check('unknown model → openai error shape (502)', badModel.status === 502 && badModel.body.error && /covers model/.test(badModel.body.error.message), JSON.stringify(badModel.body));
+
+// ---- DSH native provider registration ----
+check('provider registered in directory', llmCalls.configurable && llmCalls.configurable.length === 1 && llmCalls.configurable[0].provider === 'dsh-llm-api-pool' && llmCalls.configurable[0].settingsNs === 'llm-api-pool', JSON.stringify(llmCalls.configurable));
+check('adapter registered for provider', llmCalls.adapter && Array.isArray(llmCalls.adapter.providers) && llmCalls.adapter.providers.includes('dsh-llm-api-pool') && typeof llmCalls.adapter.adapter.stream === 'function', JSON.stringify(llmCalls.adapter && llmCalls.adapter.providers));
+check('model discovery registered', llmCalls.discovery && llmCalls.discovery.ns === 'llm-api-pool', JSON.stringify(llmCalls.discovery));
+check('settings ns registered (zero-config)', settingsCalls.ns === 'llm-api-pool', String(settingsCalls.ns));
+
+// adapter behavior: model list = pool union
+const adapter = llmCalls.adapter.adapter;
+const adapterModels = await adapter.listModels('dsh-llm-api-pool');
+check('adapter listModels → pool union', adapterModels.map((m) => m.id).includes('deepseek-v4-flash') && adapterModels.map((m) => m.id).includes('kimi-k3'), JSON.stringify(adapterModels));
+
+// adapter stream: DSH GenerateOptions → pool routing → StreamChunks
+const chunks = [];
+for await (const chunk of adapter.stream({
+  provider: 'dsh-llm-api-pool',
+  model: 'deepseek-v4-flash',
+  system: 'be brief',
+  messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+})) chunks.push(chunk);
+const kinds = chunks.map((c) => c.type);
+check('adapter stream → block-start/text-delta/block-end/usage/finish', kinds.includes('block-start') && kinds.includes('text-delta') && kinds.includes('block-end') && kinds.includes('usage') && kinds.includes('finish'), kinds.join(','));
+const finish = chunks.find((c) => c.type === 'finish');
+check('adapter stream finish → stop', finish && finish.reason && finish.reason.kind === 'stop', JSON.stringify(finish));
+const usage = chunks.find((c) => c.type === 'usage');
+check('adapter stream usage tokens', usage && usage.usage && usage.usage.inputTokens === 1000 && usage.usage.outputTokens === 500, JSON.stringify(usage))
 
 console.log(failures === 0 ? '\nsmoke: ALL GREEN' : `\nsmoke: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

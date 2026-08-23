@@ -17,7 +17,7 @@ Pool multiple opencode go subscriptions (each = one `{baseUrl, apiKey}`), track 
 dsh plugin --profile web add dsh-llm-api-pool
 ```
 
-The package declares `dsh.bundle.patch` + `dsh.client`. `dsh plugin add` installs the package, appends it to `dsh.profile.bundles`, and the profile boot merges `cordis.patch.yml` (host half + `/llm-pool/api` JSON routes + `/llm-pool/v1` OpenAI-compatible endpoints) plus the browser half (settings page).
+The package declares `dsh.bundle.patch` + `dsh.client`. `dsh plugin add` installs the package, appends it to `dsh.profile.bundles`, and the profile boot merges `cordis.patch.yml` (host half + `/llm-pool/api` JSON routes + `/llm-pool/v1` OpenAI-compatible endpoints + **automatic native DSH model-provider registration**) plus the browser half (settings page).
 
 > Install/mount mechanics follow the official `dsh plugin` bundle flow; the published package's host half is guarded by `test/smoke-static.mjs`, and full Web mount + post-restart rendering should be checked once on first install.
 
@@ -29,6 +29,16 @@ The package declares `dsh.bundle.patch` + `dsh.client`. `dsh plugin add` install
 4. Add a second subscription (different key) → second card with its own balance; model requests route to the key with the most remaining quota and auto-switch on failure.
 
 Model-facing pool tools: `llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`.
+
+## Use the pool as a native DSH provider (0.1.6, zero config)
+
+On load the plugin **automatically** registers a model provider named **LLM API Pool (余额热切换)** with DSH:
+
+- **It appears in the Model picker automatically**: its models are the union of every probed model across pool entries; selecting any of them routes through the pool (balance-driven hot switching takes over automatically);
+- **The Models settings page shows the provider row as ready**, with no fields to fill (baseURL/apiKey come from the pool, not from model settings);
+- An empty pool exposes no models; the provider gains models as soon as the first key is added.
+
+No manual provider setup, no baseURL/apiKey fields.
 
 ## Use the pool as an OpenAI-compatible provider (0.1.5)
 
@@ -80,8 +90,8 @@ The pool file (below) stays on disk; delete it manually if no longer needed.
 ## Development & tests
 
 ```bash
-npm test              # static smoke: 10 tool registrations + /llm-pool/api add→balance→list + /llm-pool/v1 OpenAI endpoints (12 assertions)
-node ../llm-pool-test/e2e.test.mjs           # full E2E: 32 checks (host / multi-sub routing / client render / live endpoint)
+npm test              # static smoke: 10 tools + /llm-pool/api + /llm-pool/v1 OpenAI endpoints + native provider registration/stream (20 assertions)
+node ../llm-pool-test/e2e.test.mjs           # full E2E: 39 checks (host / provider registration / multi-sub routing / client render / live endpoint / real key)
 LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs  # real-key full lifecycle (CRUD + real balance + real chat)
 ```
 
