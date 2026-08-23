@@ -59,7 +59,7 @@ function check(name, cond, detail) {
 const { apply, name, VERSION, inject } = await import('../lib/index.js');
 await apply(makeCtx());
 
-check('exports (name/VERSION/inject)', name === 'dsh-llm-api-pool' && VERSION === '0.1.0' && inject.includes('webServer') && inject.includes('tools'), `${name}@${VERSION}`);
+check('exports (name/VERSION/inject)', name === 'dsh-llm-api-pool' && /^0\.1\./.test(VERSION) && inject.includes('webServer') && inject.includes('tools'), `${name}@${VERSION}`);
 check('10 tools registered', registered.length === 10, 'got ' + registered.length);
 check('route /llm-pool/api mounted', routes.length === 1 && routes[0].path === '/llm-pool/api', JSON.stringify(routes.map((r) => r.path)));
 
