@@ -1,11 +1,15 @@
 # dsh-llm-api-pool
 
-DeepSeek Harness (DSH) LLM API 池管理插件 —— 多 LLM API 订阅的统一管理、官方余额/用量查询与用量感知热切换。
+> 为 **opencode go** 设计的 API 池:根据余额热管理切换不同 API key。
 
-- **多订阅**:条目主键 = `{baseUrl, apiKey}`。同一个 key 重复添加 = 原地更新配置;不同 key = 新订阅。可以同时管理任意多个 opencode go 订阅。
-- **官方余额/用量(纯 API Key)**:对 opencode go 条目调用网关原生 `GET {baseUrl}/usage`(opencode.ai/zen/go/v1),返回**官方** rolling(5h)/weekly(周)/monthly(月)百分比 + 精确重置时刻。无需 org token。
-- **用法感知热切换**:`usageScore` 优先用官方用量压力(`remotePressure`,`usageRemote` 缓存 5 分钟 TTL);chat 多候选时非阻塞刷新过期官方用量,选出**余量最大**的订阅;失败(429/5xx/超时)冷却该条目 60 秒并自动尝试下一个。
-- **设置页 UI**:设置 →「LLM API 池」:添加/删除/启停条目、探查模型、每张卡片独立展示官方限额(进度条 + 美元 + 重置时刻)、路由预览。
+把多个 opencode go 订阅(每个 = 一个 `{baseUrl, apiKey}`)收进一个池,实时掌握每个 key 的官方用量/余额,并按"余量最大者优先"自动路由模型请求;一个 key 用满或失败时,自动热切换到下一个。
+
+## 核心能力
+
+- **多 API key 池**:条目主键 = `{baseUrl, apiKey}`。同一个 key 重复添加 = 原地更新配置;不同 key = 新订阅。同时管理任意多个 opencode go 订阅,无需命名约定。
+- **官方余额/用量查询(纯 API Key,无需 org token)**:对每个 opencode 条目调用网关原生 `GET https://opencode.ai/zen/go/v1/usage`,返回**官方** rolling(5h)/weekly(周)/monthly(月)三重限额的用量百分比与精确重置时刻。美元数值 = `百分比 × 限额` 的换算供参考,不是 opcode 官方返回的原始金额。
+- **余额驱动热切换**:路由决策优先使用官方用量压力(`remotePressure`,`usageRemote` 缓存 5 分钟 TTL);模型请求前若官方用量过期则非阻塞刷新,选出**余量最大**的订阅;失败(429/5xx/超时)冷却该 key 60 秒并自动尝试下一个。
+- **设置页 UI**:设置 →「LLM API 池」:添加/删除/启停条目、探查模型、每张卡片独立展示官方限额(进度条 + 换算美元 + 重置时刻)、路由预览。
 
 ## 安装
 
@@ -16,29 +20,41 @@ dsh plugin --profile web add dsh-llm-api-pool
 包声明了 `dsh.bundle.patch` + `dsh.client`,`dsh plugin add` 会:
 1. 把包加入 profile 依赖;
 2. 发现 `dsh.bundle.patch` → 自动把 `dsh-llm-api-pool` 追加进 `dsh.profile.bundles`;
-3. 启动时合成 `cordis.patch.yml`,host 半(shell 池管理逻辑 + `/llm-pool/api` JSON 路由)挂进 host 组合;`dsh.client` 声明让 client 半(设置页)被 web shell 装载。
+3. 启动时合成 `cordis.patch.yml`:host 半(池管理 + `/llm-pool/api` JSON 路由)挂进 host 组合;`dsh.client` 声明让 client 半(设置页)被 web shell 装载。
+
+> 安装/挂载的机制引用自 dsh 官方 CLI 协调流程;发布包自身通过 `test/smoke-static.mjs` 守护 host 半的注册与路由回路,完整 Web 挂载与重启后的设置页渲染请在首次安装后核对。
 
 ## 使用
 
 1. 打开 **设置 → LLM API 池**;
-2. **+ 添加 API**:预设选 OpenCode Go(自动填入 zen/go/v1 与 5h $12 / 周 $30 / 月 $60 限额),粘贴 OPENCODE_API_KEY → 添加并自动探查模型;
-3. 卡片上 **「刷新限额 / 查询余额」** 调用官方 `/usage` 端点,显示 `[官方] $x.xx / $cap (p%) · 重置 HH:MM:SS`;
-4. 添加第二个订阅(不同 key)→ 第二张卡片,独立限额;模型请求自动优先路由到余量最大的订阅。
+2. **+ 添加 API**:预设选 OpenCode Go(自动填入 `https://opencode.ai/zen/go/v1` 与 5h $12 / 周 $30 / 月 $60 限额),粘贴 `OPENCODE_API_KEY` → 添加并自动探查模型列表;
+3. 卡片上 **「刷新限额 / 查询余额」** 调用官方 `/usage` 端点,显示 `[官方] $x.xx / $cap (p%) · 重置 HH:MM:SS`(p% 为官方百分比,$ 为换算值);
+4. 添加第二个订阅(不同 key)→ 第二张卡片,各自独立余额;模型请求自动优先路由到余量最大的订阅,失败自动切换。
 
 模型也可直接调用池工具:`llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`。
 
-## 数据存储
-
-条目持久化在 `sandboxPolicy.workspaceRoot/.dsh-llm-api-pool.json`(含掩码 key、官方用量缓存、本地账本)。
-
-## 开发
+## 卸载
 
 ```bash
-# host/client 半由 llm-pool-test/e2e.test.mjs 端到端测试守护:
-# (T1 host 逻辑 / T1b 多订阅路由 / T2 client 渲染 / T3 live 端点 / T4 真实 key 全生命周期)
-node llm-pool-test/e2e.test.mjs          # 无 key:32 项含 SKIP
-LLM_POOL_TEST_KEY=sk-... node llm-pool-test/e2e.test.mjs   # 真实全生命周期
+dsh plugin --profile web remove dsh-llm-api-pool
 ```
+
+移除后池文件(见下)保留在磁盘,如不再需要可手动删除。
+
+## 数据与安全
+
+- 条目持久化在 `sandboxPolicy.workspaceRoot/.dsh-llm-api-pool.json`:含 **API key 明文**(本机文件权限保护)、官方用量缓存、本地账本。请勿将该文件提交到版本库。
+- 插件在 host 进程内会向 `opencode.ai` / `console.opencode.ai` 发起只读的用量查询请求,并在你主动调用 `llm_pool_chat` 时向条目 baseUrl 发送模型请求。
+
+## 开发与测试
+
+```bash
+npm test          # 静态包冒烟:mock ctx 下跑通 10 工具注册 + /llm-pool/api add→balance→list(7 项)
+node ../llm-pool-test/e2e.test.mjs             # 完整 E2E:32 项(T1 host / T1b 多订阅路由 / T2 client 渲染 / T3 live 端点)
+LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs   # 真实 key 全生命周期(增查改删 + 真实余额 + 真实 chat)
+```
+
+E2E 套件位于仓库外(`../llm-pool-test/`),守护的动态逻辑与发布包 host 半逐字一致(发布包已静态化转换并单独冒烟)。
 
 ## License
 
