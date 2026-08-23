@@ -1,0 +1,63 @@
+{
+  "name": "dsh-llm-api-pool",
+  "version": "0.1.0",
+  "description": "DSH LLM API pool manager: multi-subscription opencode go management with official usage/balance (pure API key), usage-based hot-switch routing, and a settings-page UI. 多 LLM API 订阅池管理:官方余额/用量查询 + 用量感知热切换 + 设置页图形化管理。",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bainianlaoyao/dsh-llm-api-pool"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node test/smoke-static.mjs",
+    "e2e": "node ../llm-pool-test/e2e.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-settings": "*"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "llm",
+    "api-pool",
+    "opencode",
+    "opencode-go",
+    "balance",
+    "usage",
+    "routing",
+    "hot-switch",
+    "multi-key"
+  ],
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml"
+  ]
+}
