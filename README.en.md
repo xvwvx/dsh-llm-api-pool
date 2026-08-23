@@ -17,7 +17,7 @@ Pool multiple opencode go subscriptions (each = one `{baseUrl, apiKey}`), track 
 dsh plugin --profile web add dsh-llm-api-pool
 ```
 
-The package declares `dsh.bundle.patch` + `dsh.client`. `dsh plugin add` installs the package, appends it to `dsh.profile.bundles`, and the profile boot merges `cordis.patch.yml` (host half + `/llm-pool/api` JSON routes) plus the browser half (settings page).
+The package declares `dsh.bundle.patch` + `dsh.client`. `dsh plugin add` installs the package, appends it to `dsh.profile.bundles`, and the profile boot merges `cordis.patch.yml` (host half + `/llm-pool/api` JSON routes + `/llm-pool/v1` OpenAI-compatible endpoints) plus the browser half (settings page).
 
 > Install/mount mechanics follow the official `dsh plugin` bundle flow; the published package's host half is guarded by `test/smoke-static.mjs`, and full Web mount + post-restart rendering should be checked once on first install.
 
@@ -29,6 +29,40 @@ The package declares `dsh.bundle.patch` + `dsh.client`. `dsh plugin add` install
 4. Add a second subscription (different key) → second card with its own balance; model requests route to the key with the most remaining quota and auto-switch on failure.
 
 Model-facing pool tools: `llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`.
+
+## Use the pool as an OpenAI-compatible provider (0.1.5)
+
+The pool exposes OpenAI-compatible endpoints on the DSH web server port (default `127.0.0.1:3080`). Point any OpenAI client's baseUrl at it and it transparently enjoys balance-driven hot switching — apiKey is ignored (routing is decided by the pool's own entries):
+
+- `GET  http://127.0.0.1:3080/llm-pool/v1/models` — union of all probed models across entries;
+- `POST http://127.0.0.1:3080/llm-pool/v1/chat/completions` — OpenAI chat input → pool routing → OpenAI output; `stream:true` returns an SSE stream.
+
+**DSH itself**: add a custom provider in model settings with baseUrl = `http://127.0.0.1:3080/llm-pool/v1`, any apiKey, and a model id already probed in the pool (e.g. `deepseek-chat`).
+
+**opencode CLI** (official route: custom provider with a baseURL override, see the [opencode providers docs](https://opencode.ai/docs/providers/)):
+
+```jsonc
+// opencode.json
+{
+  "provider": {
+    "dsh-pool": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "DSH LLM API Pool",
+      "options": {
+        "baseURL": "http://127.0.0.1:3080/llm-pool/v1",
+        "apiKey": "any-value"
+      },
+      "models": {
+        "deepseek-chat": { "name": "DeepSeek Chat (pooled)" }
+      }
+    }
+  }
+}
+```
+
+**Any OpenAI SDK**: set `baseURL` to `http://127.0.0.1:3080/llm-pool/v1`, `apiKey` to any value, and `chat.completions.create({ model, messages })` is routed through the pool.
+
+> The port follows the DSH web server (`webStartup.port`, default 3080); if you changed the web port, update the URLs above accordingly.
 
 ## Uninstall
 
@@ -46,7 +80,7 @@ The pool file (below) stays on disk; delete it manually if no longer needed.
 ## Development & tests
 
 ```bash
-npm test              # static smoke: 10 tool registrations + /llm-pool/api add→balance→list (7 checks)
+npm test              # static smoke: 10 tool registrations + /llm-pool/api add→balance→list + /llm-pool/v1 OpenAI endpoints (12 assertions)
 node ../llm-pool-test/e2e.test.mjs           # full E2E: 32 checks (host / multi-sub routing / client render / live endpoint)
 LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs  # real-key full lifecycle (CRUD + real balance + real chat)
 ```

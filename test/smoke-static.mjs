@@ -41,14 +41,22 @@ function fakeRes() {
   r.end = (b) => { r.body = b; };
   return r;
 }
-function post(route, path, body) {
+function post(route, path, body, method) {
   const req = new Readable({ read() {} });
   req.url = path;
-  req.method = 'POST';
+  req.method = method || 'POST';
   req.push(JSON.stringify(body));
   req.push(null);
   const res = fakeRes();
-  return route.handler(req, res).then(() => ({ status: res.status, body: JSON.parse(res.body) }));
+  return route.handler(req, res).then(() => ({ status: res.status, body: res.body ? JSON.parse(res.body) : null }));
+}
+function getReq(route, path) {
+  const req = new Readable({ read() {} });
+  req.url = path;
+  req.method = 'GET';
+  req.push(null);
+  const res = fakeRes();
+  return route.handler(req, res).then(() => ({ status: res.status, body: res.body ? JSON.parse(res.body) : null }));
 }
 
 let failures = 0;
@@ -61,7 +69,7 @@ await apply(makeCtx());
 
 check('exports (name/VERSION/inject)', name === 'dsh-llm-api-pool' && /^0\.1\./.test(VERSION) && inject.includes('webServer') && inject.includes('tools'), `${name}@${VERSION}`);
 check('10 tools registered', registered.length === 10, 'got ' + registered.length);
-check('route /llm-pool/api mounted', routes.length === 1 && routes[0].path === '/llm-pool/api', JSON.stringify(routes.map((r) => r.path)));
+check('routes mounted (/api + /v1)', routes.length === 2 && routes[0].path === '/llm-pool/api' && routes[1].path === '/llm-pool/v1', JSON.stringify(routes.map((r) => r.path)));
 
 const route = routes[0];
 const add = await post(route, '/llm-pool/api/add', { baseUrl: 'https://opencode.ai/zen/go/v1', apiKey: 'sk-test-000', preset: 'opencode-go' });
@@ -73,6 +81,20 @@ check('balance via route → official /usage rolling 9%', bal.status === 200 && 
 
 const list = await post(route, '/llm-pool/api/list', {});
 check('list via route → 1 entry, key masked', list.status === 200 && list.body.pool.length === 1 && /^\S*\*{4}\S*$/.test(list.body.pool[0].apiKey), JSON.stringify(list.body.pool));
+
+// ---- OpenAI-compatible provider endpoints ----
+const models = await getReq(routes[1], '/llm-pool/v1/models');
+check('GET /v1/models union → both probed ids', models.status === 200 && models.body.object === 'list' && models.body.data.map((m) => m.id).includes('deepseek-v4-flash') && models.body.data.map((m) => m.id).includes('kimi-k3'), JSON.stringify(models.body));
+
+// chat/completions
+const chat = await post(routes[1], '/llm-pool/v1/chat/completions', { model: 'deepseek-v4-flash', messages: [{ role: 'user', content: 'hi' }] });
+check('openai chat/completions → content + usage', chat.status === 200 && chat.body.object === 'chat.completion' && chat.body.choices && chat.body.choices[0] && typeof chat.body.choices[0].message.content === 'string', JSON.stringify(chat.body));
+check('openai chat usage token counts', chat.body.usage && chat.body.usage.total_tokens > 0, JSON.stringify(chat.body.usage));
+check('openai chat pool metadata (api used)', chat.body.pool && chat.body.pool.api && chat.body.pool.api.id === 'api-1', JSON.stringify(chat.body.pool));
+
+// unknown model → OpenAI-shaped error
+const badModel = await post(routes[1], '/llm-pool/v1/chat/completions', { model: 'no-such-model', messages: [{ role: 'user', content: 'x' }] });
+check('unknown model → openai error shape (502)', badModel.status === 502 && badModel.body.error && /covers model/.test(badModel.body.error.message), JSON.stringify(badModel.body));
 
 console.log(failures === 0 ? '\nsmoke: ALL GREEN' : `\nsmoke: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

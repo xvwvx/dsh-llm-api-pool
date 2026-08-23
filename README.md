@@ -20,7 +20,7 @@ dsh plugin --profile web add dsh-llm-api-pool
 包声明了 `dsh.bundle.patch` + `dsh.client`,`dsh plugin add` 会:
 1. 把包加入 profile 依赖;
 2. 发现 `dsh.bundle.patch` → 自动把 `dsh-llm-api-pool` 追加进 `dsh.profile.bundles`;
-3. 启动时合成 `cordis.patch.yml`:host 半(池管理 + `/llm-pool/api` JSON 路由)挂进 host 组合;`dsh.client` 声明让 client 半(设置页)被 web shell 装载。
+3. 启动时合成 `cordis.patch.yml`:host 半(池管理 + `/llm-pool/api` JSON 路由 + `/llm-pool/v1` OpenAI 兼容端点)挂进 host 组合;`dsh.client` 声明让 client 半(设置页)被 web shell 装载。
 
 > 安装/挂载的机制引用自 dsh 官方 CLI 协调流程;发布包自身通过 `test/smoke-static.mjs` 守护 host 半的注册与路由回路,完整 Web 挂载与重启后的设置页渲染请在首次安装后核对。
 
@@ -32,6 +32,40 @@ dsh plugin --profile web add dsh-llm-api-pool
 4. 添加第二个订阅(不同 key)→ 第二张卡片,各自独立余额;模型请求自动优先路由到余量最大的订阅,失败自动切换。
 
 模型也可直接调用池工具:`llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`。
+
+## 作为 OpenAI 兼容 provider 接入(0.1.5)
+
+池本身暴露了 OpenAI 兼容端点,复用 DSH Web 服务端口(默认 `127.0.0.1:3080`),任何 OpenAI 客户端把 baseUrl 指过来即可透明享受余额热切换——apiKey 任意(路由由池内的条目决定):
+
+- `GET  http://127.0.0.1:3080/llm-pool/v1/models` — 池内所有条目探查到的模型并集;
+- `POST http://127.0.0.1:3080/llm-pool/v1/chat/completions` — OpenAI chat 输入 → 池路由 → OpenAI 输出;`stream:true` 时返回 SSE 流。
+
+**DSH 自身**:模型设置中新增自定义 provider,baseUrl = `http://127.0.0.1:3080/llm-pool/v1`,apiKey 任意,模型名填池内已探查的模型(如 `deepseek-chat`)。
+
+**opencode CLI**(官方做法:自定义 provider 覆写 baseURL,参考 [opencode providers 文档](https://opencode.ai/docs/providers/)):
+
+```jsonc
+// opencode.json
+{
+  "provider": {
+    "dsh-pool": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "DSH LLM API Pool",
+      "options": {
+        "baseURL": "http://127.0.0.1:3080/llm-pool/v1",
+        "apiKey": "any-value"
+      },
+      "models": {
+        "deepseek-chat": { "name": "DeepSeek Chat (pooled)" }
+      }
+    }
+  }
+}
+```
+
+**任意 OpenAI SDK**:`baseURL` 指向 `http://127.0.0.1:3080/llm-pool/v1`,`apiKey` 填任意值,`chat.completions.create({ model, messages })` 即走池路由。
+
+> 端口跟随 DSH Web 服务(`webStartup.port`,默认 3080);若改动过 Web 端口,请同步替换上文 URL。
 
 ## 卸载
 
@@ -49,7 +83,7 @@ dsh plugin --profile web remove dsh-llm-api-pool
 ## 开发与测试
 
 ```bash
-npm test          # 静态包冒烟:mock ctx 下跑通 10 工具注册 + /llm-pool/api add→balance→list(7 项)
+npm test          # 静态包冒烟:mock ctx 下跑通 10 工具注册 + /llm-pool/api add→balance→list + /llm-pool/v1 OpenAI 端点(12 项断言)
 node ../llm-pool-test/e2e.test.mjs             # 完整 E2E:32 项(T1 host / T1b 多订阅路由 / T2 client 渲染 / T3 live 端点)
 LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs   # 真实 key 全生命周期(增查改删 + 真实余额 + 真实 chat)
 ```
