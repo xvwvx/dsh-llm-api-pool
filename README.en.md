@@ -34,7 +34,7 @@ Model-facing pool tools: `llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / 
 
 On load the plugin **automatically** registers a model provider named **LLM API Pool (余额热切换)** with DSH:
 
-- **It appears in the Model picker automatically**: its models are the union of every probed model across pool entries; selecting any of them routes through the pool (balance-driven hot switching takes over automatically);
+- **It appears in the Model picker automatically**: its models are the union of every probed model across pool entries; selecting any of them routes through the pool (balance-driven hot switching takes over automatically); every model exposes a **reasoning effort picker** (low/medium/high/max) forwarded to the opencode go gateway as `reasoning_effort` ("off" is rejected by the gateway so it is not offered; unset uses the gateway default);
 - **The Models settings page shows the provider row as ready**, with no fields to fill (baseURL/apiKey come from the pool, not from model settings);
 - An empty pool exposes no models; the provider gains models as soon as the first key is added.
 

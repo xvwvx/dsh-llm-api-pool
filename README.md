@@ -37,7 +37,7 @@ dsh plugin --profile web add dsh-llm-api-pool
 
 装载后插件**自动**向 DSH 注册一个名为 **LLM API Pool (余额热切换)** 的模型 provider:
 
-- **模型选择器自动出现**:模型列表 = 池内所有条目探查到的模型并集,选中任何一个即走池路由(余额热切换自动接管);
+- **模型选择器自动出现**:模型列表 = 池内所有条目探查到的模型并集,选中任何一个即走池路由(余额热切换自动接管);每个模型带 **reasoning effort 选择器**(low/medium/high/max),选择经池透传给 opencode go 网关(`reasoning_effort`;off 被网关拒绝故不提供,未选时用网关默认);
 - **模型设置页自动显示该 provider 行**:显示为已就绪,没有任何需要填写的字段(baseUrl/apiKey 都来自池,不在模型设置里);
 - 池为空时 provider 的模型列表为空,添加第一个 key 后自动出现。
 

@@ -9,6 +9,7 @@ const registered = [];
 const routes = [];
 const llmCalls = { configurable: null, adapter: null, discovery: null };
 const settingsCalls = { ns: null };
+const chatBodies = [];
 
 function makeCtx() {
   return {
@@ -18,7 +19,10 @@ function makeCtx() {
         const url = spec.env.LLM_POOL_URL;
         if (url.includes('/models')) return { stdout: { text: JSON.stringify({ object: 'list', data: [{ id: 'deepseek-v4-flash' }, { id: 'kimi-k3' }] }) + '\n200' }, exitCode: 0 };
         if (url.includes('/usage')) return { stdout: { text: JSON.stringify({ usage: { rolling: { percent: 9, resetsAt: 't' }, weekly: { percent: 13, resetsAt: 't' }, monthly: { percent: 6, resetsAt: 't' } } }) + '\n200' }, exitCode: 0 };
-        if (url.includes('/chat/completions')) return { stdout: { text: JSON.stringify({ usage: { prompt_tokens: 1000, completion_tokens: 500 }, choices: [{ message: { role: 'assistant', content: 'mock answer' }, finish_reason: 'stop' }] }) + '\n200' }, exitCode: 0 };
+        if (url.includes('/chat/completions')) {
+          if (spec.stdin) { try { chatBodies.push(JSON.parse(String(spec.stdin))); } catch {} }
+          return { stdout: { text: JSON.stringify({ usage: { prompt_tokens: 1000, completion_tokens: 500 }, choices: [{ message: { role: 'assistant', content: 'mock answer' }, finish_reason: 'stop' }] }) + '\n200' }, exitCode: 0 };
+        }
         return { stdout: { text: 'nf\n404' }, exitCode: 0 };
       },
     },
@@ -117,6 +121,10 @@ const adapter = llmCalls.adapter.adapter;
 const adapterModels = await adapter.listModels('dsh-llm-api-pool');
 check('adapter listModels → pool union', adapterModels.map((m) => m.id).includes('deepseek-v4-flash') && adapterModels.map((m) => m.id).includes('kimi-k3'), JSON.stringify(adapterModels));
 
+// reasoning effort: resolveModel advertises efforts so the Model picker shows a selector
+const rmeta = await adapter.resolveModel('dsh-llm-api-pool', 'deepseek-v4-flash');
+check('resolveModel reasoning efforts (picker data)', rmeta.reasoning && Array.isArray(rmeta.reasoning.efforts) && rmeta.reasoning.efforts.length >= 3 && rmeta.reasoning.efforts.some((e) => e.id === 'low') && rmeta.reasoning.efforts.some((e) => e.id === 'high'), JSON.stringify(rmeta.reasoning));
+
 // adapter stream: DSH GenerateOptions → pool routing → StreamChunks
 const chunks = [];
 for await (const chunk of adapter.stream({
@@ -131,6 +139,14 @@ const finish = chunks.find((c) => c.type === 'finish');
 check('adapter stream finish → stop', finish && finish.reason && finish.reason.kind === 'stop', JSON.stringify(finish));
 const usage = chunks.find((c) => c.type === 'usage');
 check('adapter stream usage tokens', usage && usage.usage && usage.usage.inputTokens === 1000 && usage.usage.outputTokens === 500, JSON.stringify(usage))
+
+// reasoning effort forwards to the upstream OpenAI body
+for await (const c of adapter.stream({
+  provider: 'dsh-llm-api-pool', model: 'deepseek-v4-flash',
+  reasoningEffort: 'high',
+  messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+})) void c;
+check('stream forwards reasoning_effort=high', chatBodies.some((b) => b.reasoning_effort === 'high'), JSON.stringify(chatBodies));
 
 console.log(failures === 0 ? '\nsmoke: ALL GREEN' : `\nsmoke: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);
