@@ -125,6 +125,13 @@ check('adapter listModels → pool union', adapterModels.map((m) => m.id).includ
 const rmeta = await adapter.resolveModel('dsh-llm-api-pool', 'deepseek-v4-flash');
 check('resolveModel reasoning efforts (picker data)', rmeta.reasoning && Array.isArray(rmeta.reasoning.efforts) && rmeta.reasoning.efforts.length >= 3 && rmeta.reasoning.efforts.some((e) => e.id === 'low') && rmeta.reasoning.efforts.some((e) => e.id === 'high'), JSON.stringify(rmeta.reasoning));
 
+// full LlmRuntime-facing surface: every method the runtime invokes on an adapter instance
+// (providerInfo/providerRetryPolicy/listModels/resolveModel/prepareCall/stream — a missing
+// one surfaces at request time as "registration.adapter.X is not a function")
+check('adapter surface complete (runtime contract)', ['providerInfo', 'providerRetryPolicy', 'listModels', 'resolveModel', 'prepareCall', 'stream'].every((m) => typeof adapter[m] === 'function'), Object.fromEntries(['providerInfo', 'providerRetryPolicy', 'listModels', 'resolveModel', 'prepareCall', 'stream'].map((m) => [m, typeof adapter[m]])));
+const prepared = await adapter.prepareCall('dsh-llm-api-pool', 'deepseek-v4-flash');
+check('prepareCall → {model(with reasoning), stream fn}', prepared && prepared.model && prepared.model.id === 'deepseek-v4-flash' && Array.isArray(prepared.model.reasoning && prepared.model.reasoning.efforts) && typeof prepared.stream === 'function', JSON.stringify({ model: prepared && prepared.model, streamType: typeof (prepared && prepared.stream) }));
+
 // adapter stream: DSH GenerateOptions → pool routing → StreamChunks
 const chunks = [];
 for await (const chunk of adapter.stream({
