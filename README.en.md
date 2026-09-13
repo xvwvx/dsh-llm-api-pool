@@ -97,6 +97,22 @@ LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs  # real-key full lif
 
 The E2E suite lives outside the repo (`../llm-pool-test/`) and guards the dynamic logic that the published host half is byte-identical to (the package is the staticized conversion, separately smoke-tested).
 
+## Related plugins
+
+Other dsh plugins by the same author, all listed in the
+[dsh plugin market](https://awesome-dsh-plugin.com/):
+
+- [`dsh-codex-mode`](https://github.com/bainianlaoyao/dsh-codex-harness) — a Codex-shaped
+  coding mode for GPT-family models: `exec_command` / `write_stdin` / `apply_patch` /
+  `view_image`, both OpenAI routes (Chat Completions and Responses), and graphical
+  subagent types.
+- [`dsh-session-robustness`](https://github.com/bainianlaoyao/dsh-session-robustness) —
+  keep long sessions recoverable.
+- [`dsh-bash-on-windows`](https://github.com/bainianlaoyao/bash-on-windows) — make Git
+  Bash the only, honestly named terminal tool on Windows.
+- [`dsh-easy-archive`](https://github.com/bainianlaoyao/easy-archive) — two-step inline
+  archiving from the workspace sidebar.
+
 ## License
 
 MIT

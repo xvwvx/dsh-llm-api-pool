@@ -100,6 +100,15 @@ LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs   # 真实 key 全�
 
 E2E 套件位于仓库外(`../llm-pool-test/`),守护的动态逻辑与发布包 host 半逐字一致(发布包已静态化转换并单独冒烟)。
 
+## 相关插件
+
+同一作者的其它 dsh 插件，均已收录于 [dsh 插件市场](https://awesome-dsh-plugin.com/)：
+
+- [`dsh-codex-mode`](https://github.com/bainianlaoyao/dsh-codex-harness) —— 面向 GPT 系模型的 Codex 形状编码预设：`exec_command` / `write_stdin` / `apply_patch` / `view_image`、OpenAI Chat Completions 与 Responses 两条路由，外加图形化子代理类型。
+- [`dsh-session-robustness`](https://github.com/bainianlaoyao/dsh-session-robustness) —— 让长会话保持可恢复。
+- [`dsh-bash-on-windows`](https://github.com/bainianlaoyao/bash-on-windows) —— 让 Git Bash 成为 Windows 上唯一且名副其实的终端工具。
+- [`dsh-easy-archive`](https://github.com/bainianlaoyao/easy-archive) —— 工作区侧边栏行内两步归档会话。
+
 ## License
 
 MIT
