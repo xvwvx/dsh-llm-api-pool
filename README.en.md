@@ -8,8 +8,9 @@ Pool multiple opencode go subscriptions (each = one `{baseUrl, apiKey}`), track 
 
 - **Multi-key pool**: entries are keyed by `{baseUrl, apiKey}`. Re-adding the same key updates it in place; a different key becomes a new subscription. Manage any number of opencode go subscriptions with no naming convention.
 - **Official usage/balance with a pure API key (no org token)**: calls the gateway-native `GET https://opencode.ai/zen/go/v1/usage` per entry — official rolling (5h) / weekly / monthly triple-limit percent plus exact reset times. USD figures are `percent × cap` conversions for reference, not raw amounts returned by opencode.
-- **Balance-driven hot switching**: routing prefers official usage pressure (`remotePressure`, `usageRemote` cached with a 5-minute TTL); before a chat, stale official usage is refreshed non-blockingly and the key with the most remaining quota is chosen; failures (429/5xx/timeout) cool that key for 60s and fall through to the next candidate.
-- **Settings-page UI**: Settings → "LLM API 池": add/remove/toggle entries, probe models, per-card official limit bars (progress + converted USD + reset time), route preview.
+- **Selectable request order**: the card header offers two policies — **least-usage first** (default: ranked by accumulated tokens + limit pressure, with cooling/exhausted entries sinking) or **card order** (walked top to bottom, again with only cooling/exhausted entries sinking); every card carries **↑ / ↓** to reorder it, and that order is persisted immediately as the priority under "card order". Both the policy and the order live in the pool file (the `routing` field and the entry array order), so they survive a restart.
+- **Balance-driven hot switching**: routing prefers official usage pressure (`remotePressure`, `usageRemote` cached with a 5-minute TTL); with multiple subscriptions a chat first refreshes stale (>5 min) official usage (bounded by the request timeout) and then the key with the most remaining quota is chosen; failures (429/5xx/timeout) cool that key for 60s and fall through to the next candidate.
+- **Settings-page UI**: Settings → "LLM API 池": add/remove/toggle/reorder entries, switch the request order, probe models, per-card official limit bars (progress + converted USD + reset time), route preview.
 
 ## Install
 
@@ -25,10 +26,11 @@ The package declares `dsh.bundle.patch` + `dsh.client`. `dsh plugin add` install
 
 1. Open **Settings → LLM API 池**;
 2. **+ 添加 API**: pick the OpenCode Go preset (fills `https://opencode.ai/zen/go/v1` and 5h $12 / week $30 / month $60 limits), paste an `OPENCODE_API_KEY` → add and auto-probe models;
-3. On a card, **刷新限额 / 查询余额** calls the official `/usage` endpoint and shows `[官方] $x.xx / $cap (p%) · 重置 HH:MM:SS` (p% official, $ converted);
+3. On a card, **刷新限额 / 查询余额** calls the official `/usage` endpoint and shows `[官方] $x.xx / $cap (p%) · 重置 MM-DD HH:MM:SS` (p% official, $ converted; the reset moment is a local-time date+time, with the year added when it falls outside the current year); official windows are cached persistently and survive a settings-page reload, and only an unreachable official endpoint falls back to `[估算]` (local ledger tokens × model price);
 4. Add a second subscription (different key) → second card with its own balance; model requests route to the key with the most remaining quota and auto-switch on failure.
+5. To pin an explicit priority, switch the header's **请求顺序** to "按卡片顺序" and arrange the cards with **↑ / ↓** (top to bottom = request priority); switch back to "按用量最少优先" to restore automatic balancing. The `#n` badge on each card shows the current position.
 
-Model-facing pool tools: `llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`.
+Model-facing pool tools: `llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_config` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`, where `llm_pool_config` reads/changes the order policy (`routing`: `score` | `listed`) and accepts an explicit card order (`order`: id list).
 
 ## Use the pool as a native DSH provider (0.1.6, zero config)
 
@@ -86,6 +88,7 @@ The pool file (below) stays on disk; delete it manually if no longer needed.
 
 - Entries persist to `sandboxPolicy.workspaceRoot/.dsh-llm-api-pool.json`: **plaintext API keys** (protected only by local file permissions), official usage cache, and the local ledger. Do not commit it.
 - The host half makes read-only usage requests to `opencode.ai` / `console.opencode.ai`, and — only when you call `llm_pool_chat` — model requests to the entry baseUrl.
+- HTTP uses the host process's global `fetch` (Node ≥18) by default and **never goes through the shell**; the `curl` fallback runs only when the host has no global `fetch` or `LLM_POOL_TRANSPORT=curl` is set. On Windows that fallback calls `curl.exe` with PowerShell variable syntax (`$env:NAME`) — PowerShell aliases `curl` to `Invoke-WebRequest`, so a POSIX-shaped `curl -sS -m 120 …` fails outright with "the parameter name 'm' is ambiguous", and `curl.exe` inside the dsh sandbox can additionally fail TLS with `SEC_E_NO_CREDENTIALS`; `fetch` is therefore the only reliable transport on Windows.
 
 ## Development & tests
 
@@ -96,22 +99,6 @@ LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs  # real-key full lif
 ```
 
 The E2E suite lives outside the repo (`../llm-pool-test/`) and guards the dynamic logic that the published host half is byte-identical to (the package is the staticized conversion, separately smoke-tested).
-
-## Related plugins
-
-Other dsh plugins by the same author, all listed in the
-[dsh plugin market](https://awesome-dsh-plugin.com/):
-
-- [`dsh-codex-mode`](https://github.com/bainianlaoyao/dsh-codex-harness) — a Codex-shaped
-  coding mode for GPT-family models: `exec_command` / `write_stdin` / `apply_patch` /
-  `view_image`, both OpenAI routes (Chat Completions and Responses), and graphical
-  subagent types.
-- [`dsh-session-robustness`](https://github.com/bainianlaoyao/dsh-session-robustness) —
-  keep long sessions recoverable.
-- [`dsh-bash-on-windows`](https://github.com/bainianlaoyao/bash-on-windows) — make Git
-  Bash the only, honestly named terminal tool on Windows.
-- [`dsh-easy-archive`](https://github.com/bainianlaoyao/easy-archive) — two-step inline
-  archiving from the workspace sidebar.
 
 ## License
 

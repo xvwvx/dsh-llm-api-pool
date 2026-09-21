@@ -8,8 +8,9 @@
 
 - **多 API key 池**:条目主键 = `{baseUrl, apiKey}`。同一个 key 重复添加 = 原地更新配置;不同 key = 新订阅。同时管理任意多个 opencode go 订阅,无需命名约定。
 - **官方余额/用量查询(纯 API Key,无需 org token)**:对每个 opencode 条目调用网关原生 `GET https://opencode.ai/zen/go/v1/usage`,返回**官方** rolling(5h)/weekly(周)/monthly(月)三重限额的用量百分比与精确重置时刻。美元数值 = `百分比 × 限额` 的换算供参考,不是 opcode 官方返回的原始金额。
-- **余额驱动热切换**:路由决策优先使用官方用量压力(`remotePressure`,`usageRemote` 缓存 5 分钟 TTL);模型请求前若官方用量过期则非阻塞刷新,选出**余量最大**的订阅;失败(429/5xx/超时)冷却该 key 60 秒并自动尝试下一个。
-- **设置页 UI**:设置 →「LLM API 池」:添加/删除/启停条目、探查模型、每张卡片独立展示官方限额(进度条 + 换算美元 + 重置时刻)、路由预览。
+- **请求顺序可选**:卡片顶部「请求顺序」二选一 —— **按用量最少优先**(默认,按累计 token + 限额压力排序,冷却或已用满的自动沉底)或**按卡片顺序**(从上到下依次尝试,同样只有冷却/已用满的沉底);每张卡片带 **↑ / ↓** 可调整上下顺序,该顺序即时持久化,即「按卡片顺序」模式的优先级。策略与顺序都写在池文件里(`routing` 字段 + 条目数组顺序),重启后保持。
+- **余额驱动热切换**:路由决策优先使用官方用量压力(`remotePressure`,`usageRemote` 缓存 5 分钟 TTL);多订阅时模型请求前会先刷新过期(>5 分钟)的官方用量(有界等待,受请求超时约束),选出**余量最大**的订阅;失败(429/5xx/超时)冷却该 key 60 秒并自动尝试下一个。
+- **设置页 UI**:设置 →「LLM API 池」:添加/删除/启停/排序条目、切换请求顺序、探查模型、每张卡片独立展示官方限额(进度条 + 换算美元 + 重置时刻)、路由预览。
 
 ## 安装
 
@@ -28,10 +29,11 @@ dsh plugin --profile web add dsh-llm-api-pool
 
 1. 打开 **设置 → LLM API 池**;
 2. **+ 添加 API**:预设选 OpenCode Go(自动填入 `https://opencode.ai/zen/go/v1` 与 5h $12 / 周 $30 / 月 $60 限额),粘贴 `OPENCODE_API_KEY` → 添加并自动探查模型列表;
-3. 卡片上 **「刷新限额 / 查询余额」** 调用官方 `/usage` 端点,显示 `[官方] $x.xx / $cap (p%) · 重置 HH:MM:SS`(p% 为官方百分比,$ 为换算值);
+3. 卡片上 **「刷新限额 / 查询余额」** 调用官方 `/usage` 端点,显示 `[官方] $x.xx / $cap (p%) · 重置 MM-DD HH:MM:SS`(p% 为官方百分比,$ 为换算值;重置时刻为**本地时区**的带日期时间,跨年时额外带年份);官方结果会持久化缓存,重开设置页仍按官方数值显示,官方端点不可达时才回退 `[估算]`(本地账本 token × 模型价格);
 4. 添加第二个订阅(不同 key)→ 第二张卡片,各自独立余额;模型请求自动优先路由到余量最大的订阅,失败自动切换。
+5. 需要固定优先级时,把顶部 **请求顺序** 切到「按卡片顺序」,再用每张卡片的 **↑ / ↓** 排出你要的顺序(自上而下 = 请求优先级);切回「按用量最少优先」即恢复自动均衡。卡片上的 `#n` 就是当前顺序。
 
-模型也可直接调用池工具:`llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`。
+模型也可直接调用池工具:`llm_pool_list` / `llm_pool_add` / `llm_pool_remove` / `llm_pool_update` / `llm_pool_probe` / `llm_pool_usage` / `llm_pool_limits` / `llm_pool_config` / `llm_pool_route` / `llm_pool_chat` / `llm_pool_balance`。其中 `llm_pool_config` 用于读/改请求顺序策略(`routing`:`score` | `listed`)以及直接给出卡片顺序(`order`:id 数组)。
 
 ## 作为 DSH 原生 provider 使用(0.1.6,零配置)
 
@@ -89,6 +91,7 @@ dsh plugin --profile web remove dsh-llm-api-pool
 
 - 条目持久化在 `sandboxPolicy.workspaceRoot/.dsh-llm-api-pool.json`:含 **API key 明文**(本机文件权限保护)、官方用量缓存、本地账本。请勿将该文件提交到版本库。
 - 插件在 host 进程内会向 `opencode.ai` / `console.opencode.ai` 发起只读的用量查询请求,并在你主动调用 `llm_pool_chat` 时向条目 baseUrl 发送模型请求。
+- HTTP 传输默认走 host 进程的全局 `fetch`(Node ≥18),**不经过 shell**;仅在宿主没有全局 `fetch`,或显式设置 `LLM_POOL_TRANSPORT=curl` 时才回退 `curl`。Windows 上回退路径使用 `curl.exe` 并遵循 PowerShell 变量语法(`$env:NAME`)——PowerShell 的 `curl` 是 `Invoke-WebRequest` 别名,POSIX 风格的 `curl -sS -m 120 …` 会直接以"参数名 'm' 歧义"失败;而 dsh 沙箱内的 `curl.exe` 还可能因 schannel 无法获取凭证(`SEC_E_NO_CREDENTIALS`)而 TLS 失败,因此 `fetch` 是 Windows 上唯一可靠的传输方式。
 
 ## 开发与测试
 
@@ -99,15 +102,6 @@ LLM_POOL_TEST_KEY=sk-... node ../llm-pool-test/e2e.test.mjs   # 真实 key 全�
 ```
 
 E2E 套件位于仓库外(`../llm-pool-test/`),守护的动态逻辑与发布包 host 半逐字一致(发布包已静态化转换并单独冒烟)。
-
-## 相关插件
-
-同一作者的其它 dsh 插件，均已收录于 [dsh 插件市场](https://awesome-dsh-plugin.com/)：
-
-- [`dsh-codex-mode`](https://github.com/bainianlaoyao/dsh-codex-harness) —— 面向 GPT 系模型的 Codex 形状编码预设：`exec_command` / `write_stdin` / `apply_patch` / `view_image`、OpenAI Chat Completions 与 Responses 两条路由，外加图形化子代理类型。
-- [`dsh-session-robustness`](https://github.com/bainianlaoyao/dsh-session-robustness) —— 让长会话保持可恢复。
-- [`dsh-bash-on-windows`](https://github.com/bainianlaoyao/bash-on-windows) —— 让 Git Bash 成为 Windows 上唯一且名副其实的终端工具。
-- [`dsh-easy-archive`](https://github.com/bainianlaoyao/easy-archive) —— 工作区侧边栏行内两步归档会话。
 
 ## License
 
